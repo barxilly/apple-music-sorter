@@ -29,6 +29,9 @@ AuthKey_*.p8
 # Generated page embeds a developer token
 music-token.html
 
+# Your personal settings (playlist, buckets, provider). Copy the example.
+config.json
+
 # caches
 .eslintcache
 .cache

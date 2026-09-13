@@ -3,8 +3,28 @@
 > [!IMPORTANT]
 > This code is almost-entirely AI generated, I don't take credit for it, nor do I recommend blind usage.
 
-Takes one big Apple Music playlist, asks DeepSeek to sort each track into mood
-buckets, then creates one playlist per bucket in your library.
+## What this is
+
+A command-line tool that takes one big Apple Music playlist and breaks it into
+several smaller playlists, sorted by mood. You point it at a playlist, it asks a
+language model to file each track under one or two of your own categories, then
+creates a playlist per category in your library.
+
+It exists because a 1,200-track playlist is unusable — you can't find anything in
+it — but splitting one by hand is an evening's work.
+
+Three things make it work in practice:
+
+- **It reasons about mood, not tags.** Genre metadata is useless for this
+  ("Rock" covers four decades of wildly different music), so each track is
+  classified by a model that knows what ABBA actually sounds like.
+- **It sorts by library id, not catalog id.** Adding a song by its catalog id
+  lets Apple re-resolve it, which can match a different release and make you
+  download a track you already own. Library ids point at the copy you have.
+- **Everything personal lives in a git-ignored `config.json`** — your playlist,
+  your categories, your model. Nothing to leak, and nothing to edit in the code.
+
+A 1,200-track playlist costs roughly **£0.25** and takes about an hour.
 
 ## How it works
 
@@ -39,7 +59,20 @@ doesn't. You can re-run the cheap half as often as you like.
 bun install
 ```
 
-### 2. Apple Music credentials
+### 2. Your settings
+
+Everything personal lives in `config.json`, which is **git-ignored** so you can't
+accidentally commit your playlist or your categories:
+
+```bash
+cp config.example.json config.json
+```
+
+At minimum set `playlist` (a share link or a bare id) and `buckets` (your
+categories — these become the playlist names). The [Config](#config) section
+covers the rest.
+
+### 3. Apple Music credentials
 
 You need **two** tokens. You generate the developer token yourself; the user
 token has to come out of a browser.
@@ -77,7 +110,7 @@ bound to *Apple's* app and every request you make fails with
 
 User tokens last a few months. When one expires every call returns 403.
 
-### 3. Environment
+### 4. Environment
 
 `.env` is git-ignored. Everything the code reads:
 
@@ -121,20 +154,21 @@ bun run playlists
 
 ## Config
 
-**Everything tunable lives in `config.ts`.** Nothing else needs editing to point
-this at a different playlist or model.
+**Everything personal lives in `config.json`**, which is git-ignored. Copy
+`config.example.json` to get started; nothing in the source needs editing to
+point this at a different playlist, categories or model.
 
-```ts
-export const config: Config = {
-  playlist: "p.3VKWW2eCb7Eql41",   // share link or bare id
-  limit: 1241,                     // tracks to read off the top
-  buckets: ["energetic", "chill", "sad", "cunty", "nostalgic"],
-  maxBucketsPerSong: 2,
-  batchSize: 1,                    // see the warning in the file
-  outFile: "categorised.json",
-  slowRequestMs: 15_000,
-  provider: PROVIDERS.deepseek,
-};
+```json
+{
+  "playlist": "https://music.apple.com/gb/playlist/my-playlist/p.XXXXXXXXXXXXXXX",
+  "limit": 100,
+  "buckets": ["energetic", "chill", "sad", "nostalgic"],
+  "maxBucketsPerSong": 2,
+  "batchSize": 1,
+  "outFile": "categorised.json",
+  "slowRequestMs": 15000,
+  "provider": "deepseek"
+}
 ```
 
 | Setting | Notes |
@@ -146,7 +180,12 @@ export const config: Config = {
 | `maxBucketsPerSong` | Up to two means a song can appear in two playlists |
 | `batchSize` | Leave at `1`; see below |
 | `outFile` | Where categorising writes its intermediate results |
-| `provider` | Which model to use |
+| `slowRequestMs` | A request slower than this gets called out on the display |
+| `provider` | Preset name: `deepseek`, `openai`, `openrouter` or `ollama` |
+| `providerOverride` | Optional; merged over the preset — `model`, `baseURL`, `requestOptions`, etc. |
+
+A missing `config.json` fails with instructions rather than silently using
+defaults, and malformed JSON tells you which file is broken.
 
 ### Trial runs without editing anything
 
@@ -157,41 +196,42 @@ LIMIT=5 bun run categorise
 OUT_FILE=/tmp/trial.json LIMIT=5 bun run categorise   # keeps your real results
 ```
 
+Set `CONFIG_FILE` to point at a different config file entirely.
+
 ### Using a different model
 
-Anything OpenAI-compatible works. Presets are in `PROVIDERS`:
+Set `provider` to a preset and override what you like:
 
-```ts
-provider: PROVIDERS.openai,     // needs OPENAI_API_KEY
-provider: PROVIDERS.openrouter, // needs OPENROUTER_API_KEY
-provider: PROVIDERS.ollama,     // local, free, no key
+```json
+{ "provider": "ollama", "providerOverride": { "model": "llama3.1" } }
 ```
 
 Or define your own:
 
-```ts
-provider: {
-  name: "Groq",
-  baseURL: "https://api.groq.com/openai/v1",
-  apiKeyEnv: "GROQ_API_KEY",
-  model: "llama-3.3-70b-versatile",
-  maxTokens: 2000,
-  retryMaxTokens: 4000,
-  jsonMode: true,
-},
+```json
+{
+  "provider": "groq",
+  "providerOverride": {
+    "name": "Groq",
+    "baseURL": "https://api.groq.com/openai/v1",
+    "apiKeyEnv": "GROQ_API_KEY",
+    "model": "llama-3.3-70b-versatile"
+  }
+}
 ```
 
 Two things to keep in step with your choice:
 
 - **`requestOptions`** are merged into every request body, which is how
   provider-specific knobs get through (`thinking`, `reasoning_effort`, `tools`).
-  A plain non-reasoning model wants this left off entirely.
+  A plain non-reasoning model wants this left off entirely — note the override
+  is a *shallow* merge, so supplying it replaces the preset's wholesale.
 - **`retryRequestOptions`** *replaces* `requestOptions` on the retry, rather
   than merging — so repeat anything you still need there.
 
-`pricing` is optional. Give it a `ratesAt(at)` function and the display shows
-live cost; leave it out and the cost columns simply disappear rather than
-showing a wrong number.
+`pricing` is not settable from `config.json`; it comes from the provider preset.
+Leave it out of a custom provider and the cost columns simply disappear rather
+than showing a wrong number.
 
 ### Keep the playlist in your library
 
@@ -235,9 +275,9 @@ are already included.
 ## Thinking mode
 
 `deepseek-flash` is a reasoning model: it emits a chain of thought before the
-answer, and that thinking is billed at output rates. The default provider is
-configured to keep it at `reasoning_effort: "low"`, via `requestOptions` in
-`config.ts`.
+answer, and that thinking is billed at output rates. The provider preset keeps
+it at `reasoning_effort: "low"` via `requestOptions`, overridable through
+`providerOverride` in `config.json`.
 
 Sometimes it thinks so long that it spends the entire token budget and returns
 **empty content**. When that happens the script retries the same request with
@@ -265,7 +305,9 @@ to a terminal. Set `NO_COLOR=1` to disable colour.
 
 | File | Role |
 |---|---|
-| `config.ts` | **Your settings** — playlist, buckets, batch size, model/provider, pricing |
+| `config.json` | **Your settings** (git-ignored) — playlist, categories, batch size, provider |
+| `config.example.json` | Template to copy from |
+| `config.ts` | Loads `config.json`, holds provider presets and defaults |
 | `appleMusic.ts` | Apple Music REST client: `getPlaylist`, `makePlaylist`, `listLibraryPlaylists`, developer-token JWT |
 | `categorise.ts` | Reads the playlist, buckets each song with DeepSeek, writes `categorised.json` |
 | `playlists.ts` | Reads `categorised.json`, creates and verifies one playlist per bucket |
@@ -339,7 +381,7 @@ either is wrong:
 - `server.limiter` **must** be `false` — the limiter treats server-side callers
   as suspicious and blocks them.
 
-Optional API keys go in `.env` — see the [Environment](#3-environment)
+Optional API keys go in `.env` — see the [Environment](#4-environment)
 section; any provider without a key is skipped.
 
 ## Design note

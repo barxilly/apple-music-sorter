@@ -1,0 +1,14 @@
+{
+  "playlist": "https://music.apple.com/gb/playlist/my-playlist/p.XXXXXXXXXXXXXXX",
+  "playlistSource": "library",
+  "limit": 100,
+  "buckets": ["energetic", "chill", "sad", "nostalgic"],
+  "maxBucketsPerSong": 2,
+  "batchSize": 1,
+  "outFile": "categorised.json",
+  "slowRequestMs": 15000,
+  "provider": "deepseek",
+  "providerOverride": {
+    "model": "deepseek-flash"
+  }
+}

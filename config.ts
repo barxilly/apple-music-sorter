@@ -5,6 +5,8 @@
 // `provider.apiKeyEnv` below.
 // ---------------------------------------------------------------------------
 
+import { existsSync, readFileSync } from "node:fs";
+
 /** USD per 1M tokens. */
 export type Rates = { input: number; cachedInput: number; output: number };
 
@@ -69,6 +71,30 @@ export type Config = {
   /** Anything slower than this gets called out on the display. */
   slowRequestMs: number;
   provider: Provider;
+};
+
+/**
+ * Shape of config.json. Every field is optional - the defaults below fill the
+ * gaps - but you'll want at least `playlist` and `buckets`.
+ */
+export type FileConfig = {
+  /** A share link or a bare id. `pl.` = catalog, `p.` = your library. */
+  playlist?: string;
+  /** Only needed if the id prefix guesses wrong. */
+  playlistSource?: "library" | "catalog";
+  limit?: number;
+  buckets?: string[];
+  maxBucketsPerSong?: number;
+  batchSize?: number;
+  outFile?: string;
+  slowRequestMs?: number;
+  /** A preset name from PROVIDERS below. */
+  provider?: string;
+  /**
+   * Merged over the preset. Shallow, so supplying `requestOptions` replaces the
+   * preset's entirely rather than merging key by key.
+   */
+  providerOverride?: Partial<Provider>;
 };
 
 // --- Playlist helpers -------------------------------------------------------
@@ -159,15 +185,15 @@ export const PROVIDERS: Record<"deepseek" | "openai" | "openrouter" | "ollama", 
   },
 };
 
-// --- Your settings ----------------------------------------------------------
+// --- Loading config.json ----------------------------------------------------
 
 /**
- * Escape hatch so you can try things without editing this file, e.g.
+ * Escape hatch so you can try things without editing config.json, e.g.
  *
  *   LIMIT=5 bun run categorise
  *   OUT_FILE=/tmp/trial.json LIMIT=5 bun run categorise
  *
- * A missing or unparseable value falls back to the default.
+ * A missing or unparseable value falls back to the file/default value.
  */
 function envNumber(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -175,32 +201,53 @@ function envNumber(name: string, fallback: number): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function loadFile(): FileConfig {
+  const path = process.env.CONFIG_FILE ?? "config.json";
+
+  if (!existsSync(path)) {
+    throw new Error(
+      `No ${path}. Copy config.example.json to ${path} and put your own playlist ` +
+        `link and buckets in it. That file is git-ignored - which is exactly where ` +
+        `anything personal belongs.`,
+    );
+  }
+
+  try {
+    return JSON.parse(readFileSync(path, "utf8")) as FileConfig;
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    throw new Error(`${path} is not valid JSON: ${reason}`);
+  }
+}
+
+function buildProvider(name: string, override?: Partial<Provider>): Provider {
+  const preset = (PROVIDERS as Record<string, Provider | undefined>)[name];
+
+  if (!preset && !override?.baseURL) {
+    throw new Error(
+      `Unknown provider "${name}". Use one of: ${Object.keys(PROVIDERS).join(", ")} - ` +
+        `or add a "providerOverride" with at least a baseURL to define your own.`,
+    );
+  }
+
+  const merged = { ...preset, ...override } as Provider;
+  return { ...merged, name: override?.name ?? preset?.name ?? name };
+}
+
+const file = loadFile();
+
+if (!file.playlist) {
+  throw new Error(`config.json has no "playlist" - see config.example.json.`);
+}
+
 export const config: Config = {
-  // Paste a share link or a bare id.
-  playlist: "p.3VKWW2eCb7Eql41",
-  limit: envNumber("LIMIT", 1241),
-
-  buckets: ["energetic", "chill", "sad", "cunty", "nostalgic"],
-  maxBucketsPerSong: 2,
-
-  /**
-   * Leave this at 1. Batching looks like it should save money, but reasoning is
-   * charged per SONG, not per request, so a bigger batch costs about the same
-   * while adding prompt tokens back on top. Worse, a 5-song batch needs roughly
-   * the whole token cap just to think, so requests start failing and retrying -
-   * which is measurably slower AND more expensive. Measured over 20 songs:
-   * batch 1 = 56s and ~£0.00019/song; batch 5 = 79s and noticeably more.
-   */
-  batchSize: envNumber("BATCH_SIZE", 1),
-
-  /** Where the intermediate results go. Override with OUT_FILE=... */
-  outFile: process.env.OUT_FILE ?? "categorised.json",
-  slowRequestMs: 15_000,
-
-  /**
-   * Swap for PROVIDERS.openai, PROVIDERS.openrouter, PROVIDERS.ollama, or your
-   * own object. Keep `model` and `requestOptions` in step with your choice -
-   * a non-reasoning model wants `requestOptions` removed.
-   */
-  provider: PROVIDERS.deepseek,
+  playlist: file.playlist,
+  playlistSource: file.playlistSource,
+  limit: envNumber("LIMIT", file.limit ?? 100),
+  buckets: file.buckets ?? ["energetic", "calm", "sad"],
+  maxBucketsPerSong: file.maxBucketsPerSong ?? 2,
+  batchSize: envNumber("BATCH_SIZE", file.batchSize ?? 1),
+  outFile: process.env.OUT_FILE ?? file.outFile ?? "categorised.json",
+  slowRequestMs: file.slowRequestMs ?? 15_000,
+  provider: buildProvider(file.provider ?? "deepseek", file.providerOverride),
 };
