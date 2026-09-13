@@ -1,7 +1,7 @@
 # apple-music-sorter
 
-> [!IMPORTANT]
-> This code is almost-entirely AI generated, I don't take credit for it, nor do I recommend blind usage.
+> [!NOTE]
+> Disclosure: AI has been used in this project.
 
 ## What this is
 
