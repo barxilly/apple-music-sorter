@@ -1,24 +1,15 @@
 // ---------------------------------------------------------------------------
 // What the categorising actually costs.
 //
-// Prices are USD per 1M tokens, from DeepSeek's published table for
-// deepseek-flash (api-docs.deepseek.com/quick_start/pricing):
-//
-//                       cache hit   cache miss   output
-//   peak                 $0.006       $0.30      $1.20
-//   off-peak             $0.003       $0.15      $0.60
-//
-// Off-peak is exactly half of peak. Peak is 01:00-04:00 and 06:00-10:00 UTC,
-// Monday to Friday; every other hour - and all weekend - is off-peak.
+// The prices themselves live in config.ts, per provider, so this file only
+// knows how to do the arithmetic. If a provider declares no pricing, the
+// display simply hides the cost rather than inventing a number.
 //
 // Reasoning tokens are billed as output tokens, so they're already counted via
 // `completion_tokens`.
 // ---------------------------------------------------------------------------
 
-const PRICE = {
-  peak: { cacheHit: 0.006, cacheMiss: 0.3, output: 1.2 },
-  offPeak: { cacheHit: 0.003, cacheMiss: 0.15, output: 0.6 },
-} as const;
+import type { Rates } from "./config.ts";
 
 const MILLION = 1_000_000;
 
@@ -33,19 +24,16 @@ export type Usage = {
 
 export const EMPTY_USAGE: Usage = { cacheHitTokens: 0, cacheMissTokens: 0, outputTokens: 0 };
 
-export function isPeak(date: Date = new Date()): boolean {
-  const day = date.getUTCDay(); // 0 = Sunday
-  if (day === 0 || day === 6) return false;
-  const hour = date.getUTCHours();
-  return (hour >= 1 && hour < 4) || (hour >= 6 && hour < 10);
-}
-
-export function costUsd(usage: Usage): number {
-  const rate = isPeak() ? PRICE.peak : PRICE.offPeak;
+/**
+ * Cost of a set of token counts at the given rates. Cache hits can be 50x
+ * cheaper than misses, so they are never lumped together.
+ */
+export function costUsd(usage: Usage, rates: Rates): number {
+  const cachedInput = rates.cachedInput ?? rates.input;
   return (
-    (usage.cacheHitTokens / MILLION) * rate.cacheHit +
-    (usage.cacheMissTokens / MILLION) * rate.cacheMiss +
-    (usage.outputTokens / MILLION) * rate.output
+    (usage.cacheHitTokens / MILLION) * cachedInput +
+    (usage.cacheMissTokens / MILLION) * rates.input +
+    (usage.outputTokens / MILLION) * rates.output
   );
 }
 

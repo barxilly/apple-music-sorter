@@ -121,21 +121,79 @@ bun run playlists
 
 ## Config
 
-All tuning lives in the constants at the top of `categorise.ts`.
+**Everything tunable lives in `config.ts`.** Nothing else needs editing to point
+this at a different playlist or model.
 
-| Constant | Default | Notes |
-|---|---|---|
-| `PLAYLIST_ID` | `p.3VKWW2eCb7Eql41` | The tail of the playlist's share URL. `p.` = your library, `pl.` = catalog/shared |
-| `PLAYLIST_SOURCE` | `"library"` | `library` = your playlist (needs the user token), `catalog` = Apple's |
-| `LIMIT` | `1241` | How many tracks to read off the top |
-| `BUCKETS` | 5 moods | Also used verbatim as playlist names |
-| `MAX_BUCKETS_PER_SONG` | `2` | Up to two categories per song |
-| `BATCH_SIZE` | `1` | Songs per model request |
-| `MODEL` | `deepseek-flash` | |
-| `MAX_TOKENS` / `RETRY_MAX_TOKENS` | `2000` / `16000` | See [Thinking mode](#thinking-mode) |
-| `OUT_FILE` | `categorised.json` | Intermediate results |
+```ts
+export const config: Config = {
+  playlist: "p.3VKWW2eCb7Eql41",   // share link or bare id
+  limit: 1241,                     // tracks to read off the top
+  buckets: ["energetic", "chill", "sad", "cunty", "nostalgic"],
+  maxBucketsPerSong: 2,
+  batchSize: 1,                    // see the warning in the file
+  outFile: "categorised.json",
+  slowRequestMs: 15_000,
+  provider: PROVIDERS.deepseek,
+};
+```
 
-### Keep `PLAYLIST_SOURCE` as `"library"`
+| Setting | Notes |
+|---|---|
+| `playlist` | Paste the whole share link **or** just the id. `pl.` = catalog/shared, `p.` = your library |
+| `playlistSource` | Optional. Only set it if the id prefix guesses wrong |
+| `limit` | How many tracks to read off the top |
+| `buckets` | Your categories — used verbatim as playlist names |
+| `maxBucketsPerSong` | Up to two means a song can appear in two playlists |
+| `batchSize` | Leave at `1`; see below |
+| `outFile` | Where categorising writes its intermediate results |
+| `provider` | Which model to use |
+
+### Trial runs without editing anything
+
+`limit`, `batchSize` and `outFile` can be overridden per run:
+
+```bash
+LIMIT=5 bun run categorise
+OUT_FILE=/tmp/trial.json LIMIT=5 bun run categorise   # keeps your real results
+```
+
+### Using a different model
+
+Anything OpenAI-compatible works. Presets are in `PROVIDERS`:
+
+```ts
+provider: PROVIDERS.openai,     // needs OPENAI_API_KEY
+provider: PROVIDERS.openrouter, // needs OPENROUTER_API_KEY
+provider: PROVIDERS.ollama,     // local, free, no key
+```
+
+Or define your own:
+
+```ts
+provider: {
+  name: "Groq",
+  baseURL: "https://api.groq.com/openai/v1",
+  apiKeyEnv: "GROQ_API_KEY",
+  model: "llama-3.3-70b-versatile",
+  maxTokens: 2000,
+  retryMaxTokens: 4000,
+  jsonMode: true,
+},
+```
+
+Two things to keep in step with your choice:
+
+- **`requestOptions`** are merged into every request body, which is how
+  provider-specific knobs get through (`thinking`, `reasoning_effort`, `tools`).
+  A plain non-reasoning model wants this left off entirely.
+- **`retryRequestOptions`** *replaces* `requestOptions` on the retry, rather
+  than merging — so repeat anything you still need there.
+
+`pricing` is optional. Give it a `ratesAt(at)` function and the display shows
+live cost; leave it out and the cost columns simply disappear rather than
+showing a wrong number.
+
+### Keep the playlist in your library
 
 Library tracks carry a `libraryId`, and the generated playlists are built with
 it, so they reference the copies you **already have**. If you read the catalog
@@ -149,7 +207,7 @@ song, which would leave each playlist holding ~40% of the library. The current
 prompt asks for one bucket, with a second as the exception. If your playlists
 come out too large, that instruction is the knob to turn.
 
-`BUCKETS` entries become playlist names, so pick names you're happy to see in
+`buckets` entries become playlist names, so pick names you're happy to see in
 your library.
 
 ## Cost
@@ -177,14 +235,18 @@ are already included.
 ## Thinking mode
 
 `deepseek-flash` is a reasoning model: it emits a chain of thought before the
-answer, and that thinking is billed at output rates. Categorising is left at
-`reasoning_effort: "low"`.
+answer, and that thinking is billed at output rates. The default provider is
+configured to keep it at `reasoning_effort: "low"`, via `requestOptions` in
+`config.ts`.
 
-Sometimes it thinks so long that it spends the entire `MAX_TOKENS` budget and
-returns **empty content**. When that happens the script retries the exact same
-request with thinking switched off (`RETRY_MAX_TOKENS`), keeping the messages,
-JSON schema and tools untouched. The run only fails if both attempts come back
-empty.
+Sometimes it thinks so long that it spends the entire token budget and returns
+**empty content**. When that happens the script retries the same request with
+`retryRequestOptions` (for DeepSeek: thinking switched off) and a larger
+`retryMaxTokens`. The run only fails if both attempts come back empty.
+
+This is why raising `batchSize` backfires: several songs' worth of reasoning
+still has to fit inside one reply cap, so a large batch starts failing and
+retrying rather than saving anything.
 
 ## The progress display
 
@@ -203,6 +265,7 @@ to a terminal. Set `NO_COLOR=1` to disable colour.
 
 | File | Role |
 |---|---|
+| `config.ts` | **Your settings** — playlist, buckets, batch size, model/provider, pricing |
 | `appleMusic.ts` | Apple Music REST client: `getPlaylist`, `makePlaylist`, `listLibraryPlaylists`, developer-token JWT |
 | `categorise.ts` | Reads the playlist, buckets each song with DeepSeek, writes `categorised.json` |
 | `playlists.ts` | Reads `categorised.json`, creates and verifies one playlist per bucket |

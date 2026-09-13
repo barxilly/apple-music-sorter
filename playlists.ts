@@ -13,8 +13,10 @@
 
 import { readFileSync } from "node:fs";
 import { getPlaylist, listLibraryPlaylists, makePlaylist, type SongRef } from "./appleMusic.ts";
+import { config } from "./config.ts";
 
-const IN_FILE = "categorised.json";
+// Kept in step with categorise.ts through config.ts.
+const IN_FILE = config.outFile;
 
 type CategorisedTrack = {
   name: string;
@@ -76,7 +78,9 @@ try {
 
   // Preserve the bucket order the categoriser used rather than whatever order
   // the JSON happened to serialise them in.
-  const buckets = data.buckets?.length ? data.buckets : [...new Set(results.map((track) => track.bucket))];
+  const buckets = data.buckets?.length
+    ? data.buckets
+    : [...new Set(results.flatMap((track) => track.buckets ?? (track.bucket ? [track.bucket] : [])))];
 
   const groups = new Map<string, Planned[]>();
   let unusable = 0;

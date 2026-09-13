@@ -10,12 +10,12 @@
 import { writeFileSync } from "node:fs";
 import OpenAI from "openai";
 import { getPlaylist, type Track } from "./appleMusic.ts";
+import { config, parsePlaylist } from "./config.ts";
 import {
   addUsage,
   costUsd,
   EMPTY_USAGE,
   formatGbp,
-  isPeak,
   totalTokens,
   usageFrom,
   usdToGbp,
@@ -23,61 +23,21 @@ import {
 } from "./cost.ts";
 import { Progress } from "./tui.ts";
 
-/**
- * Your LIBRARY playlist - not the catalog/shared copy. Library entries carry a
- * libraryId, and that is what lets the generated playlists point at the copies
- * you already have, instead of letting Apple re-match each song.
- */
-const PLAYLIST_ID = "p.3VKWW2eCb7Eql41";
+// Everything tunable lives in config.ts - nothing below needs editing to point
+// this at a different playlist or model.
+const { provider } = config;
+const OUT_FILE = config.outFile;
+const SLOW_REQUEST_MS = config.slowRequestMs;
+const BATCH_SIZE = config.batchSize;
+const BUCKETS = config.buckets;
+const MAX_BUCKETS_PER_SONG = config.maxBucketsPerSong;
+
+/** Buckets are user-defined now, so a bucket is just a string. */
+type Bucket = string;
+
+const PLAYLIST = parsePlaylist(config.playlist);
 /** `library` = your own playlist (needs the user token); `catalog` = Apple's. */
-const PLAYLIST_SOURCE: "library" | "catalog" = "library";
-/** How many tracks to pull off the top of the playlist. */
-const LIMIT = 1241;
-const OUT_FILE = "categorised.json";
-
-/**
- * Songs per request. Small enough that the bar actually moves and that a bad
- * reply only costs one chunk, large enough to stay cheap.
- */
-const BATCH_SIZE = 1;
-
-/** The buckets songs get sorted into. Edit this list to change the scheme. */
-const BUCKETS = ["energetic", "chill", "sad", "cunty", "nostalgic"] as const;
-type Bucket = (typeof BUCKETS)[number];
-
-/** A song may be filed under at most this many buckets. */
-const MAX_BUCKETS_PER_SONG = 2;
-
-const MODEL = "deepseek-flash";
-
-/**
- * Thinking is ON at LOW effort: enough reasoning to help with genuinely
- * ambiguous tracks, without the runaway token burn of the default high effort.
- * A one-song answer is tiny, so 2000 tokens is roomy.
- */
-const MAX_TOKENS = 2000;
-
-/**
- * Safety net. If thinking overruns the budget it can leave `content` empty -
- * the whole budget spent on reasoning and no answer. When that happens we
- * retry the same request with thinking switched off.
- */
-const RETRY_MAX_TOKENS = 16000;
-
-/**
- * Anything slower than this gets called out on the display. Normal requests sit
- * around 1-3s, so a spike here means provider throttling or a silent SDK retry
- * rather than simply a song that needed more thought.
- */
-const SLOW_REQUEST_MS = 15_000;
-
-/**
- * Bucketing a song needs no tool calls - the model already knows what ABBA
- * sounds like, and a web search per track would be slow and pointless. Kept as
- * an explicit slot so the retry keeps whatever this becomes instead of silently
- * dropping it.
- */
-const TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] | undefined = undefined;
+const PLAYLIST_SOURCE: "library" | "catalog" = config.playlistSource ?? PLAYLIST.source;
 
 /** One line of the model's reply: 1-2 bucket names for a single song. */
 type BucketRow = { n?: number; buckets?: string[] };
@@ -109,40 +69,33 @@ async function categoriseBatch(
   ];
 
   /**
-   * Everything except the thinking settings, so the retry varies ONLY those -
-   * messages, JSON schema and `tools` all stay exactly as they were.
+   * Everything that stays the same across attempts. Provider-specific knobs
+   * ride along in `requestOptions` - the OpenAI SDK forwards unknown body keys
+   * untouched, which is how DeepSeek's `thinking` gets through.
    */
-  const shared = {
-    model: MODEL,
-    response_format: { type: "json_object" as const },
+  const base = {
+    model: provider.model,
     messages,
-    tools: TOOLS,
+    ...(provider.jsonMode ? { response_format: { type: "json_object" as const } } : {}),
   };
 
-  const request = (
-    thinking: { type: "enabled" | "disabled" },
-    maxTokens: number,
-    effort?: "low" | "high" | "max",
-  ) =>
+  const request = (options: Record<string, unknown> | undefined, maxTokens: number) =>
     openai.chat.completions.create({
-      ...shared,
+      ...base,
       max_tokens: maxTokens,
-      // `thinking` is not part of the OpenAI schema, so the SDK has no typed
-      // field for it and it rides along as an extra body key.
-      thinking,
-      reasoning_effort: effort,
+      ...options,
     } as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming);
 
-  let completion = await request({ type: "enabled" }, MAX_TOKENS, "low");
+  let completion = await request(provider.requestOptions, provider.maxTokens);
   let choice = completion.choices?.[0];
   let content = choice?.message?.content;
   let retried = false;
 
   if (!content) {
-    // Thinking ate the budget and left no room for the answer. Same request,
-    // thinking off, tools intact.
+    // First attempt came back empty - usually thinking ate the whole budget.
+    // Retry with the provider's fallback options (for DeepSeek, thinking off).
     retried = true;
-    completion = await request({ type: "disabled" }, RETRY_MAX_TOKENS);
+    completion = await request(provider.retryRequestOptions ?? provider.requestOptions, provider.retryMaxTokens);
     choice = completion.choices?.[0];
     content = choice?.message?.content;
   }
@@ -189,9 +142,12 @@ async function categoriseBatch(
 let ui: Progress | undefined;
 
 try {
-  if (!process.env.DEEPSEEK_API_KEY) throw new Error("Missing DEEPSEEK_API_KEY.");
+  const apiKey = provider.apiKeyEnv ? process.env[provider.apiKeyEnv] : "not-needed";
+  if (provider.apiKeyEnv && !apiKey) {
+    throw new Error(`Missing ${provider.apiKeyEnv}. Add it to .env, or pick another provider in config.ts.`);
+  }
 
-  const tracks = await getPlaylist(PLAYLIST_ID, { source: PLAYLIST_SOURCE, limit: LIMIT });
+  const tracks = await getPlaylist(PLAYLIST.id, { source: PLAYLIST_SOURCE, limit: config.limit });
   if (tracks.length === 0) throw new Error("Playlist came back empty - nothing to categorise.");
 
   // Songs with neither id are uploads Apple never matched to the catalog, so
@@ -199,19 +155,25 @@ try {
   const unreusable = tracks.filter((track) => !track.libraryId && !track.catalogId).length;
   if (unreusable > 0) console.log(`${unreusable} track(s) have no reusable id and will be skipped.\n`);
 
-  console.log(`Buckets: ${BUCKETS.join(", ")}\n`);
+  console.log(`Playlist: ${PLAYLIST.id} (${PLAYLIST_SOURCE}), reading ${config.limit} track(s)`);
+  console.log(`Provider: ${provider.name} - ${provider.model}`);
+  console.log(`Buckets : ${BUCKETS.join(", ")}\n`);
 
-  const openai = new OpenAI({
-    baseURL: "https://api.deepseek.com",
-    apiKey: process.env.DEEPSEEK_API_KEY,
-  });
+  const openai = new OpenAI({ baseURL: provider.baseURL, apiKey });
 
   const batchCount = Math.ceil(tracks.length / BATCH_SIZE);
 
+  const now = new Date();
+  const pricing = provider.pricing;
+  const rates = pricing?.ratesAt(now) ?? null;
+  const rateLabel = pricing?.labelAt?.(now) ?? "";
   const { rate: usdGbp, source: fxSource } = await usdToGbp();
+
   console.log(
-    `Pricing: deepseek-flash ${isPeak() ? "PEAK" : "off-peak"} · ` +
-      `FX USD→GBP ${usdGbp.toFixed(4)} (${fxSource})\n`,
+    rates
+      ? `Pricing: ${provider.model}${rateLabel ? ` (${rateLabel})` : ""} · ` +
+          `FX USD→GBP ${usdGbp.toFixed(4)} (${fxSource})\n`
+      : `Pricing: none configured for ${provider.name} - cost display hidden\n`,
   );
 
   ui = new Progress("Categorising", tracks.length).start();
@@ -247,13 +209,14 @@ try {
     // Project the final bill from what we've spent so far. Each song costs so
     // little that the estimate settles down quickly - handy before pointing
     // this at a playlist 30x bigger.
-    const spent = costUsd(usage) * usdGbp;
+    const spent = rates ? costUsd(usage, rates) * usdGbp : 0;
     const fraction = (offset + batch.length) / tracks.length;
 
     ui.advance(batch.length, {
       tokens: totalTokens(usage),
-      cost: formatGbp(spent),
-      estimate: formatGbp(fraction > 0 ? spent / fraction : spent),
+      ...(rates
+        ? { cost: formatGbp(spent), estimate: formatGbp(fraction > 0 ? spent / fraction : spent) }
+        : {}),
     });
   }
 
@@ -280,21 +243,25 @@ try {
     OUT_FILE,
     JSON.stringify(
       {
-        playlist: PLAYLIST_ID,
+        playlist: PLAYLIST.id,
         source: PLAYLIST_SOURCE,
-        model: MODEL,
-        thinking: "low effort (retry: disabled)",
+        provider: provider.name,
+        model: provider.model,
+        requestOptions: provider.requestOptions ?? null,
+        retryRequestOptions: provider.retryRequestOptions ?? null,
         retries,
         slowRequests,
         buckets: BUCKETS,
         generatedAt: new Date().toISOString(),
-        pricing: {
-          peak: isPeak(),
-          usdToGbp,
-          costUsd: Number(costUsd(usage).toFixed(6)),
-          costGbp: Number((costUsd(usage) * usdGbp).toFixed(6)),
-          tokens: usage,
-        },
+        pricing: rates
+          ? {
+              label: rateLabel || undefined,
+              usdToGbp,
+              costUsd: Number(costUsd(usage, rates).toFixed(6)),
+              costGbp: Number((costUsd(usage, rates) * usdGbp).toFixed(6)),
+              tokens: usage,
+            }
+          : { usdToGbp, tokens: usage },
         results,
       },
       null,
