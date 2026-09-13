@@ -10,8 +10,8 @@ several smaller playlists, sorted by mood. You point it at a playlist, it asks a
 language model to file each track under one or two of your own categories, then
 creates a playlist per category in your library.
 
-It exists because a 1,200-track playlist is unusable — you can't find anything in
-it — but splitting one by hand is an evening's work.
+It exists because my 1,200-track playlist was unusable, you can't find anything in
+it, but splitting one by hand is an evening's work.
 
 Three things make it work in practice:
 
@@ -21,10 +21,10 @@ Three things make it work in practice:
 - **It sorts by library id, not catalog id.** Adding a song by its catalog id
   lets Apple re-resolve it, which can match a different release and make you
   download a track you already own. Library ids point at the copy you have.
-- **Everything personal lives in a git-ignored `config.json`** — your playlist,
-  your categories, your model. Nothing to leak, and nothing to edit in the code.
+- **Everything personal lives in `config.json`** - your playlist,
+  your categories, your model, etc
 
-A 1,200-track playlist costs roughly **£0.25** and takes about an hour.
+My 1,200-track playlist costed roughly **£0.25** on Deepseek-Flash and took about an hour.
 
 ## How it works
 
@@ -38,7 +38,7 @@ your tracks
 categorised.json  (bucket(s) + catalog/library ids + isrc per track)
         |  makePlaylist()                playlists.ts
         v
-energetic / chill / sad / cunty / nostalgic
+energetic / chill / sad / nostalgic
 ```
 
 Three separate steps on purpose: categorising costs money, creating playlists
@@ -61,15 +61,14 @@ bun install
 
 ### 2. Your settings
 
-Everything personal lives in `config.json`, which is **git-ignored** so you can't
-accidentally commit your playlist or your categories:
+Everything personal lives in `config.json`:
 
 ```bash
 cp config.example.json config.json
 ```
 
 At minimum set `playlist` (a share link or a bare id) and `buckets` (your
-categories — these become the playlist names). The [Config](#config) section
+categories, these become the playlist names). The [Config](#config) section
 covers the rest.
 
 ### 3. Apple Music credentials
@@ -78,12 +77,12 @@ You need **two** tokens. You generate the developer token yourself; the user
 token has to come out of a browser.
 
 **a. Developer token.** In the Apple Developer portal create a Key with
-*MusicKit* enabled and download the `.p8` — you only get one chance to download
+*MusicKit* enabled and download the `.p8` - you only get one chance to download
 it. Then set:
 
 | Variable | Where to find it |
 |---|---|
-| `APPLE_TEAM_ID` | Membership details — a 10-character team id |
+| `APPLE_TEAM_ID` | Membership details, a 10-character team id |
 | `APPLE_KEY_ID` | The Key ID of the MusicKit key |
 | `APPLE_PRIVATE_KEY_PATH` | Path to the `.p8` you just saved |
 
@@ -99,7 +98,7 @@ bun run token --serve
 
 Open <http://localhost:8899>, click **Authorize**, sign in, and paste the value
 it prints into `.env`. Without `--serve` the script just writes
-`music-token.html` for you to host yourself — `file://` tends to break Apple's
+`music-token.html` for you to host yourself, `file://` tends to break Apple's
 sign-in popup. If your Bun swallows the flag, the same thing works as
 `SERVE=1 bun run token`.
 
@@ -176,13 +175,13 @@ point this at a different playlist, categories or model.
 | `playlist` | Paste the whole share link **or** just the id. `pl.` = catalog/shared, `p.` = your library |
 | `playlistSource` | Optional. Only set it if the id prefix guesses wrong |
 | `limit` | How many tracks to read off the top |
-| `buckets` | Your categories — used verbatim as playlist names |
+| `buckets` | Your categories, used verbatim as playlist names |
 | `maxBucketsPerSong` | Up to two means a song can appear in two playlists |
 | `batchSize` | Leave at `1`; see below |
 | `outFile` | Where categorising writes its intermediate results |
 | `slowRequestMs` | A request slower than this gets called out on the display |
 | `provider` | Preset name: `deepseek`, `openai`, `openrouter` or `ollama` |
-| `providerOverride` | Optional; merged over the preset — `model`, `baseURL`, `requestOptions`, etc. |
+| `providerOverride` | Optional; merged over the preset, `model`, `baseURL`, `requestOptions`, etc. |
 
 A missing `config.json` fails with instructions rather than silently using
 defaults, and malformed JSON tells you which file is broken.
@@ -224,10 +223,10 @@ Two things to keep in step with your choice:
 
 - **`requestOptions`** are merged into every request body, which is how
   provider-specific knobs get through (`thinking`, `reasoning_effort`, `tools`).
-  A plain non-reasoning model wants this left off entirely — note the override
+  A plain non-reasoning model wants this left off entirely, note the override
   is a *shallow* merge, so supplying it replaces the preset's wholesale.
 - **`retryRequestOptions`** *replaces* `requestOptions` on the retry, rather
-  than merging — so repeat anything you still need there.
+  than merging, so repeat anything you still need there.
 
 `pricing` is not settable from `config.json`; it comes from the provider preset.
 Leave it out of a custom provider and the cost columns simply disappear rather
@@ -237,7 +236,7 @@ than showing a wrong number.
 
 Library tracks carry a `libraryId`, and the generated playlists are built with
 it, so they reference the copies you **already have**. If you read the catalog
-copy instead you get catalog ids, which Apple re-resolves when adding — that can
+copy instead you get catalog ids, which Apple re-resolves when adding, that can
 match a different release and make you download a song you already own.
 
 ### Bucket wording matters
@@ -305,7 +304,7 @@ to a terminal. Set `NO_COLOR=1` to disable colour.
 
 | File | Role |
 |---|---|
-| `config.json` | **Your settings** (git-ignored) — playlist, categories, batch size, provider |
+| `config.json` | **Your settings** (git-ignored), playlist, categories, batch size, provider |
 | `config.example.json` | Template to copy from |
 | `config.ts` | Loads `config.json`, holds provider presets and defaults |
 | `appleMusic.ts` | Apple Music REST client: `getPlaylist`, `makePlaylist`, `listLibraryPlaylists`, developer-token JWT |
@@ -337,7 +336,7 @@ library (a `catalog` source), the fallback path re-resolves by catalog id and
 can hit the re-download problem described above.
 
 **`index.ts` imports `dotenv`**, which isn't a declared dependency. Bun loads
-`.env` automatically, so that import is redundant — remove it if a clean
+`.env` automatically, so that import is redundant, remove it if a clean
 install fails to resolve it.
 
 ### Running under Node
@@ -350,7 +349,7 @@ node --env-file=.env categorise.ts
 node --env-file=.env playlists.ts --dry
 ```
 
-Node's strip-only mode can't run class *parameter properties* — that's why
+Node's strip-only mode can't run class *parameter properties*, that's why
 `tui.ts` declares its fields longhand.
 
 ## Search backend (SearXNG)
@@ -376,12 +375,12 @@ It listens on **http://localhost:8888**, bound to `127.0.0.1` only. Point
 Two settings in `searxng/settings.yml` matter, and the code fails loudly if
 either is wrong:
 
-- `search.formats` **must** include `json` — it's off by default, and
+- `search.formats` **must** include `json`, it's off by default, and
   `?format=json` returns a 403 without it.
-- `server.limiter` **must** be `false` — the limiter treats server-side callers
+- `server.limiter` **must** be `false`, the limiter treats server-side callers
   as suspicious and blocks them.
 
-Optional API keys go in `.env` — see the [Environment](#4-environment)
+Optional API keys go in `.env`, see the [Environment](#4-environment)
 section; any provider without a key is skipped.
 
 ## Design note
@@ -389,7 +388,7 @@ section; any provider without a key is skipped.
 Providers **throw** on failure rather than returning an empty list. This is
 deliberate: an empty result set reads to the model as "this song doesn't exist",
 and it responds by hallucinating. A `search_unavailable` error tells it to admit
-it couldn't verify instead. DuckDuckGo is the clearest example — when it
+it couldn't verify instead. DuckDuckGo is the clearest example, when it
 rate-limits an IP it serves a CAPTCHA challenge page, which is very easy to
 mistake for "no results".
 
