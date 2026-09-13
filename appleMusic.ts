@@ -33,12 +33,20 @@ const TOKEN_REFRESH_MARGIN_MS = 24 * 60 * 60 * 1000;
 /** A track, flattened to the fields the sorter actually cares about. */
 export type Track = {
   /**
-   * Apple Music **catalog** song id. This is the id you feed back into
-   * `makePlaylist`. Falls back to the library id for uploaded/regional tracks
-   * that don't exist in the catalog (those cannot be re-added via the API).
+   * Best id to re-add this track with: the catalog id if there is one,
+   * otherwise the library id. Convenient, but prefer `catalogId` / `libraryId`
+   * below when the distinction matters - re-adding a CATALOG id lets Apple
+   * re-match the song, which can land on a different release and force a fresh
+   * download of something you already have.
    */
   id: string;
-  /** Present only for tracks that came out of your library. */
+  /** The catalog song id, when this track exists in the catalog. */
+  catalogId?: string;
+  /**
+   * The id of this exact item in *your* library (`i.xxxx`), present for tracks
+   * read from a library playlist. Adding by this references the copy you
+   * already own - no re-match, no re-download.
+   */
   libraryId?: string;
   name: string;
   artist: string;
@@ -48,10 +56,13 @@ export type Track = {
 };
 
 /**
- * Something `makePlaylist` can add. Either a bare catalog song id, or an object
- * with an `id` (a `Track` from `getPlaylist` satisfies this structurally).
+ * Something `makePlaylist` can add. A bare string is treated as a CATALOG song
+ * id. Pass `{ id, type: "library-songs" }` to reference an item already in your
+ * library instead: that stops Apple re-matching the song to a different
+ * release, which is what causes an unwanted re-download.
  */
-export type SongRef = string | { id: string };
+export type SongResource = { id: string; type?: "songs" | "library-songs" };
+export type SongRef = string | SongResource;
 
 export type GetPlaylistOptions = {
   /**
@@ -251,12 +262,16 @@ type RawTrack = {
 
 function toTrack(item: RawTrack): Track {
   const attributes = item.attributes ?? {};
-  const catalogId = attributes.playParams?.catalogId;
   const isLibrary = item.type === "library-songs";
+  // For a library song, playParams.id is the library id and catalogId is the
+  // catalog equivalent (absent entirely for an uploaded/unmatched song).
+  const libraryId = isLibrary ? attributes.playParams?.id ?? item.id : undefined;
+  const catalogId = attributes.playParams?.catalogId ?? (isLibrary ? undefined : item.id);
 
   return {
-    id: catalogId ?? item.id ?? "",
-    libraryId: isLibrary ? attributes.playParams?.id ?? item.id : undefined,
+    id: catalogId ?? libraryId ?? "",
+    catalogId,
+    libraryId,
     name: attributes.name ?? "(unknown track)",
     artist: attributes.artistName ?? "(unknown artist)",
     album: attributes.albumName ?? "",
@@ -328,9 +343,15 @@ export async function makePlaylist(
   if (songs.length === 0) throw new Error("makePlaylist needs at least one song.");
 
   const refs = songs.map((song) => {
-    const id = (typeof song === "string" ? song : song.id).trim();
+    if (typeof song === "string") {
+      const id = song.trim();
+      if (!id) throw new Error("makePlaylist received a song with no id.");
+      return { id, type: "songs" as const };
+    }
+
+    const id = song.id.trim();
     if (!id) throw new Error("makePlaylist received a song with no id.");
-    return { id, type: "songs" as const };
+    return { id, type: song.type ?? ("songs" as const) };
   });
 
   const created = await appleFetch<{ id?: string; attributes?: { name?: string } }>("/v1/me/library/playlists", {
@@ -356,4 +377,37 @@ export async function makePlaylist(
   }
 
   return { id: playlist.id, name: playlist.attributes?.name ?? playlistName, trackCount: refs.length };
+}
+
+export type PlaylistSummary = { id: string; name: string; trackCount?: number };
+
+/**
+ * Every playlist in your library.
+ *
+ * This exists so a second categorised run can avoid creating a duplicate
+ * playlist for a bucket that's already there.
+ */
+export async function listLibraryPlaylists(): Promise<PlaylistSummary[]> {
+  const playlists: PlaylistSummary[] = [];
+  const pending: string[] = ["/v1/me/library/playlists?limit=100"];
+
+  while (pending.length > 0) {
+    const path = pending.shift();
+    if (!path) break;
+
+    const page = await appleFetch<{ id?: string; attributes?: { name?: string; trackCount?: number } }>(path);
+
+    for (const item of page.data ?? []) {
+      if (!item.id) continue;
+      playlists.push({
+        id: item.id,
+        name: item.attributes?.name ?? "",
+        trackCount: item.attributes?.trackCount,
+      });
+    }
+
+    if (page.next) pending.push(page.next);
+  }
+
+  return playlists;
 }

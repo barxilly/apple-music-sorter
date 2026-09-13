@@ -12,6 +12,7 @@
   "scripts": {
     "start": "bun run index.ts",
     "categorise": "bun run categorise.ts",
+    "playlists": "bun run playlists.ts",
     "token": "bun run getUserToken.ts",
     "search:up": "docker compose up -d",
     "search:down": "docker compose down",
