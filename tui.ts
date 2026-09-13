@@ -30,12 +30,16 @@ function truncate(text: string, width: number): string {
   return `${text.replace(ANSI, "").slice(0, Math.max(0, width - 1))}…`;
 }
 
-/** "12.4s" under a minute, "1m05s" above it. */
+/** "12.4s" under a minute, "1m05s" under an hour, "9h32m" beyond that. */
 export function humanSeconds(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) return "--";
   if (seconds < 60) return `${seconds.toFixed(1)}s`;
+
   const minutes = Math.floor(seconds / 60);
-  return `${minutes}m${String(Math.round(seconds % 60)).padStart(2, "0")}s`;
+  if (minutes < 60) return `${minutes}m${String(Math.round(seconds % 60)).padStart(2, "0")}s`;
+
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h${String(minutes % 60).padStart(2, "0")}m`;
 }
 
 export type StatusUpdate = {
@@ -90,6 +94,21 @@ export class Progress {
   setStatus(label: string): void {
     this.label = label;
     if (isTTY) this.draw();
+  }
+
+  /**
+   * Print a line above the live display without breaking it. Used for things
+   * worth knowing about long after the bar has moved on, e.g. a stalled
+   * request that suggests throttling.
+   */
+  log(message: string): void {
+    if (!isTTY) {
+      process.stderr.write(`${message}\n`);
+      return;
+    }
+    this.clearBlock();
+    process.stderr.write(`${message}\n`);
+    this.draw();
   }
 
   /** A chunk of work finished. */
@@ -160,7 +179,9 @@ export class Progress {
     const rate = done > 0 ? done / elapsed : 0;
     const fraction = this.total > 0 ? done / this.total : 0;
 
-    const columns = process.stderr.columns ?? 80;
+    // A detached tmux pane (or a pty with no client) can report 0 columns, which
+    // would collapse the bar and truncate the status line to nothing.
+    const columns = Math.max(48, process.stderr.columns ?? 80);
     const barWidth = Math.max(10, Math.min(34, columns - 48));
     const filled = Math.round(fraction * barWidth);
     const bar = cyan("█".repeat(filled)) + dim("░".repeat(Math.max(0, barWidth - filled)));
@@ -174,7 +195,11 @@ export class Progress {
     // (sparkline, then the long label) is what gets truncated, and the label is
     // the least important thing here.
     const stats: string[] = [dim(humanSeconds(elapsed))];
-    stats.push(done > 0 ? `${rate.toFixed(1)}/s · ${perSong.toFixed(2)}s/song` : dim("warming up"));
+    // One decimal of songs/second reads as "0.0" the moment you go slower than
+    // one song every few seconds, so flip to a per-minute figure down there.
+    const rateText =
+      done === 0 ? dim("warming up") : rate >= 1 ? `${rate.toFixed(1)}/s` : `${(rate * 60).toFixed(1)}/min`;
+    stats.push(done > 0 ? `${rateText} · ${perSong.toFixed(2)}s/song` : rateText);
     if (this.cost) stats.push(green(this.cost));
     if (this.estimate && done < this.total) stats.push(dim(`est ${this.estimate}`));
     if (this.tokens > 0) stats.push(dim(`${Math.round(this.tokens / 1000)}k tok`));

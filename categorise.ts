@@ -65,6 +65,13 @@ const MAX_TOKENS = 2000;
 const RETRY_MAX_TOKENS = 16000;
 
 /**
+ * Anything slower than this gets called out on the display. Normal requests sit
+ * around 1-3s, so a spike here means provider throttling or a silent SDK retry
+ * rather than simply a song that needed more thought.
+ */
+const SLOW_REQUEST_MS = 15_000;
+
+/**
  * Bucketing a song needs no tool calls - the model already knows what ABBA
  * sounds like, and a web search per track would be slow and pointless. Kept as
  * an explicit slot so the retry keeps whatever this becomes instead of silently
@@ -212,6 +219,7 @@ try {
   const byIndex = new Map<number, Bucket[]>();
   let usage: Usage = EMPTY_USAGE;
   let retries = 0;
+  let slowRequests = 0;
 
   for (let offset = 0; offset < tracks.length; offset += BATCH_SIZE) {
     const batch = tracks.slice(offset, offset + BATCH_SIZE);
@@ -220,7 +228,18 @@ try {
       `batch ${Math.floor(offset / BATCH_SIZE) + 1}/${batchCount} · ${first?.artist ?? ""} - ${first?.name ?? ""}`,
     );
 
+    const requestStartedAt = Date.now();
     const result = await categoriseBatch(openai, batch);
+    const requestMs = Date.now() - requestStartedAt;
+
+    if (requestMs > SLOW_REQUEST_MS) {
+      slowRequests += 1;
+      ui.log(
+        `slow request: ${(requestMs / 1000).toFixed(1)}s for ` +
+          `"${first?.artist ?? ""} - ${first?.name ?? ""}" (normal is 1-3s)`,
+      );
+    }
+
     for (const [localIndex, buckets] of result.byIndex) byIndex.set(offset + localIndex, buckets);
     usage = addUsage(usage, result.usage);
     if (result.retried) retries += 1;
@@ -266,6 +285,7 @@ try {
         model: MODEL,
         thinking: "low effort (retry: disabled)",
         retries,
+        slowRequests,
         buckets: BUCKETS,
         generatedAt: new Date().toISOString(),
         pricing: {
