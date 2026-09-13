@@ -1,0 +1,22 @@
+{
+  "name": "apple-music-sorter",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "scripts": {
+    "start": "bun run index.ts",
+    "token": "bun run getUserToken.ts",
+    "search:up": "docker compose up -d",
+    "search:down": "docker compose down",
+    "search:logs": "docker compose logs -f --tail 20"
+  },
+  "dependencies": {
+    "openai": "^7.15.0"
+  }
+}

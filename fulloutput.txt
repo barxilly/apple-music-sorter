@@ -1,0 +1,41 @@
+{
+  "message": {
+    "role": "assistant",
+    "content": "Energetic",
+    "reasoning_content": "It's a dance-pop / house-tinged upbeat track. Energetic.\n\nOne-word answer: energetic."
+  },
+  "transcript": [
+    {
+      "role": "system",
+      "content": "You are a music librarian. Call web_search to look things up instead of guessing. Search first, then answer. If a search fails, do NOT treat that as proof the song is unknown - fall back on your own knowledge and note that you could not verify it. If a one-word answer is requested, reply with just that word."
+    },
+    {
+      "role": "user",
+      "content": "Which mood most applies to this song: In The City by Charli XCX & Sam Smith? Provide a one-word answer of sad, calm, or energetic."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "index": 0,
+          "id": "call_00_QJcftskmlOgnlz0leuK89803",
+          "type": "function",
+          "function": {
+            "name": "web_search",
+            "arguments": "{\"query\": \"In The City Charli XCX Sam Smith\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_QJcftskmlOgnlz0leuK89803",
+      "content": "{\"provider\":\"searxng\",\"results\":[{\"title\":\"In the City (Charli XCX and Sam Smith song) - Wikipedia\",\"url\":\"https://en.wikipedia.org/wiki/In_the_City_(Charli_XCX_and_Sam_Smith_song)\",\"snippet\":\"\\\"In the City\\\" is a song by British singers Charli XCX and Sam Smith. It was released on 19 October 2023 through Atlantic Records. History between the two artists dates back as far as 2014, when both would hang out together at the 2014 MTV Video Music Awards as well as a subsequent cover of ...\"},{\"title\":\"[Mature Content] r/popheads on Reddit: Charli XCX ft Sam Smith - In The City\",\"url\":\"https://www.reddit.com/r/popheads/comments/17bodby/charli_xcx_ft_sam_smith_in_the_city/\",\"snippet\":\"[Soundcloud]: Charli XCX - In The City ft. Sam Smith (HQ SNIPPET) -- uploaded by HyperPop Leaks\"},{\"title\":\"In The City ft Sam Smith is slept on : r/charlixcx - Reddit\",\"url\":\"https://www.reddit.com/r/charlixcx/comments/1jodju6/in_the_city_ft_sam_smith_is_slept_on/\",\"snippet\":\"Mar 31, 2025 ... Genuinely a fantastic song. It honestly felt like trans / homophobia for Charli fans to hate on this song so bad Charli had to make a statement ...\"},{\"title\":\"In the City (song) - Charli XCX Wiki - Fandom\",\"url\":\"https://xcx-world.fandom.com/wiki/In_the_City_(song)\",\"snippet\":\"\\\"In the City\\\" is a song by English singer-songwriters Charli XCX and Sam Smith. It was released on 19 October 2023 as a stand-alone single through Atlantic ...\"},{\"title\":\"Charli XCX & Sam Smith - In The City Lyrics | AZLyrics.com\",\"url\":\"https://www.azlyrics.com/lyrics/charlixcx/inthecity.html\",\"snippet\":\"COBRAH - \\\"SUCK\\\" Suck my clit You'll love it Get down, sit I insist Babe, eat my clit You'll love it Give it a spit I insist Get on the floor, I'll do a split ...\"}]}"
+    },
+    {
+      "role": "assistant",
+      "content": "Energetic"
+    }
+  ]
+}

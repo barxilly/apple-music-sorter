@@ -1,0 +1,24 @@
+# SearXNG config for apple-music-sorter.
+# `use_default_settings` keeps every stock engine and only applies the
+# overrides below, so this stays short and survives image upgrades.
+use_default_settings: true
+
+server:
+  # Required. Without it SearXNG regenerates config on every boot.
+  secret_key: "e2b5f5702d9cc7b55733be20de464653d3a380bbd2c0b13004ab327077f4cefb"
+  # The limiter blocks "suspicious" clients, which includes server-side callers
+  # like this script. Must stay off for API use.
+  limiter: false
+  image_proxy: false
+
+search:
+  # The JSON format is disabled by default. Without "json" here, every
+  # ?format=json request returns a 403.
+  formats:
+    - html
+    - json
+  safe_search: 0
+  autocomplete: ""
+
+# Engine choice is left at the defaults (Google, Bing, DuckDuckGo, Wikipedia,
+# Brave, ...). Prune this list if you want fewer upstream requests.
