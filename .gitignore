@@ -39,3 +39,8 @@ music-token.html
 
 # Finder (MacOS) folder config
 .DS_Store
+
+fulloutput.txt
+categorised.json
+
+*.lock
