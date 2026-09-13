@@ -1,7 +1,7 @@
-# apple-music-sorter
+# Apple Music Mood Sorter
 
 > [!NOTE]
-> Disclosure: AI has been used in this project.
+> AI has been used in this project.
 
 ## What this is
 
